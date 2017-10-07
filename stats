@@ -1,0 +1,230 @@
+#!/bin/bash
+
+#DONNNNNNNNNNNEEEEEE
+
+
+
+#Filename: stats
+#Author: Howard Chen
+#Date Last Modified: 7/10/2017
+#Description: script that takes an input file and calculates the max/median
+#	of every row or every column (depending on the flags), and then
+#	writes the rseults to stdout
+#
+#
+#This shell script is run as follows:
+#	stats {-row | -cols} [input_file]
+# OR	stats {-r | -c } [input_file] as an abbreviation
+
+
+#Trap the interrupt, hangup, and terminate sigals.
+#Delete all tmp files on trap
+trap "rm *_tmp$$; exit 1" 1 2 15 
+
+
+
+# Function that takes a single row of white-space separated integers and calculates the
+# mean, rounded to the nearest integer, and sends the mean to stdout
+# Arguments: single line of white-space separated integers
+# Pre:	None
+# Post: None
+# Ret: calculated mean, returned through stdout
+mean () {
+	#process the line number by number to calculate sum and count
+	# wc probably would have been better here, but I didn't realize
+	# the wc command existed
+	local count=0
+	local sum=0
+	for num in $1
+	do
+		count=`expr $count + 1`
+		sum=`expr $sum + $num`
+	done
+
+	# Calculate the rounded mean
+	local b_2=`expr $count / 2`
+	local val=`expr $sum + $b_2`
+	local mean=`expr $val / $count` 
+	
+	echo $mean
+}
+
+# Function that takes a single row of white-space separated integers and calculates the median.
+# If there are an even number of integers, it sends the larger of the two
+# middle integers to stdout
+# Arguments: single line of white-space separated integers
+# Pre: None
+# Post: None
+# Ret: calculated median, returned through stdout
+median () {
+	# process the line number by number to calculate count
+	# wc probably would have been better here, but I didn't realize 
+	# the wc command existed
+	local count=0
+	for num in $1
+	do
+		count=`expr $count + 1`
+		echo $num >> "median0_tmp$$"
+	done
+
+	#Sort the line, and use the count to determine the median
+	sort -n "median0_tmp$$" | tr '\n' '\t'  >"median1_tmp$$" 
+	local sorted
+	read sorted < "median1_tmp$$"
+	
+	local count_2=`expr $count / 2`
+	local index=`expr $count_2 + 1`
+	local i=0
+	local median=0
+	for num in $sorted
+	do
+		i=`expr $i + 1`
+		if [ $i -eq $index ]
+		then
+			median=$num	
+		fi
+
+	done
+
+	#Remove the function's tmp files, since the function
+	# will be called more than once
+	rm median0_tmp$$
+	rm median1_tmp$$
+
+	echo $median
+}
+
+
+#name of tmp file to store data if stdin is used for the script
+datasource="datasource_tmp$$"
+
+# Handle all possible error cases 
+# First, check the number of arguments
+if [ $# -eq 2 ] || [ $# -eq 1 ]
+then
+	#Make sure the flags are correct
+	if [[ $1 != -r* ]] && [[ $1 != -c* ]]
+	then
+		echo "$0 {-row | -cols} [input_file]" 1>&2
+		exit 1
+	fi
+
+	#if only one argument, set up to read from stdin.
+	#otherwise check that the specified file exists and is readable,
+	# then continue to next block of code below
+	if [ $# -eq 1 ]
+	then
+		cat > "$datasource"
+		
+	elif ! [ -e $2 ] || ! [ -r $2 ]
+	then
+		# if file does not exist or cannot be read,
+		# then exit with error
+		echo "$0: cannot read $2" 1>&2
+		exit 1
+	else
+		#If input file was specified, use it
+		datasource=$2
+	fi
+
+else
+	#Definitely incorrect number of arguments. Exit with error
+	echo "$0 {-row | -cols} [input_file]" 1>&2
+	exit 1
+fi
+
+
+
+
+# If we got here, no errors in calling the script. So, read data from the input
+# and process it by rows or by columns, calculating mean and and median
+if [[ $1 = -r* ]]
+then
+	#Unfortunately, I have to do this so rm won't complain later in the case
+	# of an empty file
+	echo "Hi" > row0_tmp$$
+
+	echo -e "Average Median"
+
+
+	#Read in the values row by row, and calculate mean and median for each row
+	while read line
+	do
+		mean "$line" >row1_tmp$$
+		read m1 <row1_tmp$$
+		printf '%s\t' "$m1"
+
+		median "$line" >row2_tmp$$
+		read m2 <row2_tmp$$
+		printf '%s\t' "$m2"
+		
+		echo
+
+	done < "$datasource"
+
+else
+	#process by column
+
+	#First, ensure that all whitespace between columns is regular space, then
+	# squeeze them down to a single space. This will ensure that my
+	# cut command will work correctly, even if the input file uses tabs
+	tr "\t" " " <"$datasource" >col1_tmp$$
+	tr -s " " <col1_tmp$$ >col2_tmp$$
+
+	#For each column in the formatted input file, 
+	# cut out the column, convert to a row, and then
+	# determine its mean and median using the functions above.
+	if read line
+	then
+		#For each number in the line, cut out the corresponding column
+		# from the input file, and calculate its average
+		echo "Averages:"
+		i=0
+		for col in $line
+		do
+			i=`expr $i + 1`
+			cut -d " " -f $i <col2_tmp$$ >col3_tmp$$
+
+			#now translate the column into a row, and read
+			# it back in.
+			tr "\n" "\t" <col3_tmp$$ >col4_tmp$$
+			read row_line <col4_tmp$$	
+
+			#now call function to calculate mean
+			mean "$row_line" >col5_tmp$$
+			read m <col5_tmp$$
+			printf '%s\t' "$m"
+		done
+
+		echo
+
+		#For each number in the line, cut out the corresponding column
+		# from the input file, and calculate its median
+		echo "Medians:"
+		i=0
+		for col in $line
+		do
+			i=`expr $i + 1`
+			cut -d " " -f $i <col2_tmp$$ > col3_tmp$$
+
+			#now translate the column into a row, and read
+			# it back in.
+			tr "\n" "\t" <col3_tmp$$ >col4_tmp$$
+			read row_line <col4_tmp$$	
+
+			#now call function to calculate median			
+			median "$row_line" >col5_tmp$$
+			read m <col5_tmp$$
+			printf '%s\t' "$m"
+		done
+		echo
+	fi <"$datasource"	
+
+fi
+
+# Finally, remove all tmp files, and exit successfully (exit code 0) 
+rm *_tmp$$
+exit 0
+
+
+
